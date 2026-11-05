@@ -956,6 +956,15 @@ int64_t sys_epoll_pwait(guest_t *g, int epfd, uint64_t events_gva,
 
         epoll_reg_t *reg = &inst->regs[gfd];
 
+        if (hl_trace_on(HL_TRACE_SYS) &&
+            fd_table[gfd].type == FD_SOCKET) {
+            hl_trace(HL_TRACE_SYS,
+                     "net epoll fd=%d host=%d filter=%d flags=0x%x data=%lld wanted=0x%x",
+                     gfd, fd_to_host(gfd), (int)kevents[i].filter,
+                     (unsigned)kevents[i].flags, (long long)kevents[i].data,
+                     reg->events);
+        }
+
         /* Check if we already have an entry for this guest fd */
         int merged = 0;
         for (int j = 0; j < nout; j++) {
