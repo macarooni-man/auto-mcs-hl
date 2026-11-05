@@ -20,6 +20,7 @@
 #include "syscall.h"
 #include "syscall_internal.h"
 #include "syscall_fd.h"
+#include "syscall_poll.h"
 #include "syscall_inotify.h"
 #include "proc_emulation.h"
 #include "syscall_proc.h"   /* proc_get_sysroot */
@@ -1141,6 +1142,10 @@ int64_t sys_fcntl(guest_t *g, int fd, int cmd, uint64_t arg) {
         fd_table[gfd].linux_flags = fd_table[fd].linux_flags & ~LINUX_O_CLOEXEC;
         if (fd_table[fd].type == FD_DEVICE)   /* carry registry pointer (V6) */
             fd_table[gfd].dir = fd_table[fd].dir;
+        if (fd_table[fd].type == FD_EPOLL && fd_table[fd].dir) {
+            hl_epoll_instance_retain(fd_table[fd].dir);
+            fd_table[gfd].dir = fd_table[fd].dir;
+        }
         if (fd_table[fd].type == FD_VIRTUAL_DIR && fd_table[fd].dir) {
             hl_vdir_retain(fd_table[fd].dir);   /* share across dup (V17) */
             fd_table[gfd].dir = fd_table[fd].dir;
