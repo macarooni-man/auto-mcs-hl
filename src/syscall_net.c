@@ -792,8 +792,14 @@ int64_t sys_connect(guest_t *g, int fd, uint64_t addr_gva, uint32_t addrlen) {
         }
     }
 
-    if (connect(host_fd, (struct sockaddr *)&mac_sa, (socklen_t)mac_len) < 0)
+    if (connect(host_fd, (struct sockaddr *)&mac_sa, (socklen_t)mac_len) < 0) {
+        if (hl_trace_on(HL_TRACE_SYS))
+            hl_trace(HL_TRACE_SYS, "net connect fd=%d host=%d errno=%d(%s)",
+                     fd, host_fd, errno, strerror(errno));
         return linux_errno();
+    }
+    if (hl_trace_on(HL_TRACE_SYS))
+        hl_trace(HL_TRACE_SYS, "net connect fd=%d host=%d result=0", fd, host_fd);
 connect_ok:
 
     /* Tag X11 display sockets for syscall_stats.
@@ -958,6 +964,14 @@ int64_t sys_sendto(guest_t *g, int fd, uint64_t buf_gva, uint64_t len,
         return ret;
     } else {
         ssize_t ret = send(host_fd, buf, len, mac_flags);
+        if (hl_trace_on(HL_TRACE_SYS)) {
+            if (ret >= 0)
+                hl_trace(HL_TRACE_SYS, "net send fd=%d host=%d requested=%llu flags=0x%x result=%lld",
+                         fd, host_fd, (unsigned long long)len, linux_flags, (long long)ret);
+            else
+                hl_trace(HL_TRACE_SYS, "net send fd=%d host=%d requested=%llu flags=0x%x errno=%d(%s)",
+                         fd, host_fd, (unsigned long long)len, linux_flags, errno, strerror(errno));
+        }
         if (ret < 0) {
             if (errno == EPIPE && !suppress_sigpipe)
                 signal_queue(LINUX_SIGPIPE);
@@ -989,6 +1003,14 @@ int64_t sys_recvfrom(guest_t *g, int fd, uint64_t buf_gva, uint64_t len,
                        (struct sockaddr *)&mac_sa, &mac_len);
     } else {
         ret = recv(host_fd, buf, len, mac_flags);
+    }
+    if (hl_trace_on(HL_TRACE_SYS)) {
+        if (ret >= 0)
+            hl_trace(HL_TRACE_SYS, "net recv fd=%d host=%d requested=%llu flags=0x%x result=%lld",
+                     fd, host_fd, (unsigned long long)len, flags, (long long)ret);
+        else if (errno != EAGAIN && errno != EWOULDBLOCK)
+            hl_trace(HL_TRACE_SYS, "net recv fd=%d host=%d requested=%llu flags=0x%x errno=%d(%s)",
+                     fd, host_fd, (unsigned long long)len, flags, errno, strerror(errno));
     }
     if (ret < 0) return linux_errno();
 
