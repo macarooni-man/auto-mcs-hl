@@ -2340,6 +2340,15 @@ int syscall_dispatch(hv_vcpu_t vcpu, guest_t *g, int *exit_code, int verbose) {
         break;
     }
 
+    if (result == -LINUX_EINVAL && hl_trace_on(HL_TRACE_SYS)) {
+        hl_trace(HL_TRACE_SYS,
+                 "EINVAL syscall=%llu args=[0x%llx,0x%llx,0x%llx,0x%llx,0x%llx,0x%llx]",
+                 (unsigned long long)x8,
+                 (unsigned long long)x0, (unsigned long long)x1,
+                 (unsigned long long)x2, (unsigned long long)x3,
+                 (unsigned long long)x4, (unsigned long long)x5);
+    }
+
     if (syscall_stats_enabled()) {
         if ((int)x8 == SYS_close && (int)x0 >= 0)
             syscall_stats_clear_fd((int)x0);
