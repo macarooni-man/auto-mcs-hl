@@ -302,6 +302,15 @@ int64_t sys_write(guest_t *g, int fd, uint64_t buf_gva, uint64_t count) {
     if (count > avail) count = avail;
 
     ssize_t ret = write(host_fd, buf, count);
+    if (fd >= 0 && fd < FD_TABLE_SIZE && fd_table[fd].type == FD_SOCKET &&
+        hl_trace_on(HL_TRACE_SYS)) {
+        if (ret >= 0)
+            hl_trace(HL_TRACE_SYS, "net write fd=%d host=%d requested=%llu result=%lld",
+                     fd, host_fd, (unsigned long long)count, (long long)ret);
+        else
+            hl_trace(HL_TRACE_SYS, "net write fd=%d host=%d requested=%llu errno=%d(%s)",
+                     fd, host_fd, (unsigned long long)count, errno, strerror(errno));
+    }
     if (ret < 0) {
         int saved_errno = errno;
         if (saved_errno == EPIPE) signal_queue(LINUX_SIGPIPE);
@@ -350,6 +359,15 @@ int64_t sys_read(guest_t *g, int fd, uint64_t buf_gva, uint64_t count) {
     if (count > avail) count = avail;
 
     ssize_t ret = read(host_fd, buf, count);
+    if (fd >= 0 && fd < FD_TABLE_SIZE && fd_table[fd].type == FD_SOCKET &&
+        hl_trace_on(HL_TRACE_SYS)) {
+        if (ret >= 0)
+            hl_trace(HL_TRACE_SYS, "net read fd=%d host=%d requested=%llu result=%lld",
+                     fd, host_fd, (unsigned long long)count, (long long)ret);
+        else if (errno != EAGAIN && errno != EWOULDBLOCK)
+            hl_trace(HL_TRACE_SYS, "net read fd=%d host=%d requested=%llu errno=%d(%s)",
+                     fd, host_fd, (unsigned long long)count, errno, strerror(errno));
+    }
     return ret < 0 ? linux_errno() : ret;
 }
 
