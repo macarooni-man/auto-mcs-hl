@@ -320,6 +320,52 @@ int main(void) {
     }
 
 
+
+    /* Mio/Tokio uses an EFD_NONBLOCK eventfd as the reactor waker and does
+     * not read the counter after each wake. Linux still emits a fresh
+     * EPOLLET event for each successful eventfd write. */
+    TEST("EPOLLET eventfd wakes on repeated writes");
+    {
+        int epfd = epoll_create1(EPOLL_CLOEXEC);
+        int efd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+
+        if (epfd < 0 || efd < 0) {
+            FAIL("epoll/eventfd setup failed");
+        } else {
+            struct epoll_event ev = {
+                .events = EPOLLIN | EPOLLET,
+                .data.fd = efd,
+            };
+
+            if (epoll_ctl(epfd, EPOLL_CTL_ADD, efd, &ev) != 0) {
+                FAIL("epoll_ctl ADD eventfd failed");
+            } else {
+                uint64_t one = 1;
+                struct epoll_event out;
+                int first = -1, second = -1;
+                uint64_t total = 0;
+
+                if (write(efd, &one, sizeof(one)) == sizeof(one))
+                    first = epoll_wait(epfd, &out, 1, 100);
+
+                /* Deliberately do not read the eventfd between writes. */
+                if (write(efd, &one, sizeof(one)) == sizeof(one))
+                    second = epoll_wait(epfd, &out, 1, 100);
+
+                ssize_t nread = read(efd, &total, sizeof(total));
+
+                if (first == 1 && second == 1 &&
+                    nread == sizeof(total) && total == 2)
+                    PASS();
+                else
+                    FAIL("second eventfd write did not generate EPOLLET wake");
+            }
+        }
+
+        if (efd >= 0) close(efd);
+        if (epfd >= 0) close(epfd);
+    }
+
     /* Tokio/Mio clones its epoll registry with F_DUPFD_CLOEXEC during
      * Runtime::new(). The duplicate must refer to the same logical epoll
      * instance, retain registrations, and remain usable after either alias
