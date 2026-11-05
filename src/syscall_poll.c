@@ -13,6 +13,7 @@
 #include "syscall_proc.h"  /* exit_group_requested */
 #include "futex.h"         /* futex_interrupt_consume */
 #include "guest.h"
+#include "trace.h"
 
 #include <stdio.h>
 #include <stdlib.h>
