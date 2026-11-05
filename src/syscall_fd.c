@@ -554,16 +554,27 @@ int64_t eventfd_write(int guest_fd, guest_t *g, uint64_t buf_gva, uint64_t count
     int was_zero = (eventfd_state[slot].counter == 0);
     eventfd_state[slot].counter += val;
 
-    /* Signal readability via pipe if counter transitioned from 0.
-     * The pipe is non-blocking; retry on EINTR and warn on other errors
-     * since a missed wakeup here can deadlock ppoll/epoll waiters. */
-    if (was_zero && eventfd_state[slot].counter > 0) {
+    /* Linux eventfd wakes edge-triggered epoll on every successful write,
+     * even when the counter was already non-zero. Our self-pipe backend must
+     * therefore create a fresh readability edge for each write. For
+     * non-blocking eventfds (the mode used by Mio/Tokio), drain the previous
+     * synthetic signal byte and replace it with a new one while leaving the
+     * logical eventfd counter untouched. Blocking eventfds keep the original
+     * 0->nonzero signalling behavior because their read end may temporarily
+     * be switched to blocking mode by eventfd_read(). */
+    if (eventfd_state[slot].nonblock || was_zero) {
         uint8_t byte = 1;
+        if (eventfd_state[slot].nonblock) {
+            uint8_t drain;
+            while (read(eventfd_state[slot].pipe_rd, &drain, 1) > 0)
+                ;
+        }
+
         ssize_t wr;
         do {
             wr = write(eventfd_state[slot].pipe_wr, &byte, 1);
         } while (wr < 0 && errno == EINTR);
-        if (wr < 0)
+        if (wr < 0 && errno != EAGAIN)
             fprintf(stderr, "hl: eventfd_write: pipe write failed: %s "
                     "(gfd=%d pipe_wr=%d)\n",
                     strerror(errno), guest_fd, eventfd_state[slot].pipe_wr);
