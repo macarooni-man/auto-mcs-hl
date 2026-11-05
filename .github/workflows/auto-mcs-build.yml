@@ -24,7 +24,7 @@ jobs:
       - name: Build ARM64 hl
         run: |
           make hl \
-            OBJCOPY="$(brew --prefix binutils)/bin/gobjcopy" \
+            GNU_OBJCOPY="$(brew --prefix binutils)/bin/gobjcopy" \
             SIGN_IDENTITY="-"
 
       - name: Verify binary and entitlement
