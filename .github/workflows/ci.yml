@@ -18,10 +18,7 @@
 name: CI
 
 on:
-  push:
-    branches: [master]
-    tags: ['v*']
-  pull_request:
+  workflow_dispatch:
 
 # Cancel redundant runs: only the latest commit on each branch/PR runs.
 # Self-hosted runners are a shared resource — don't queue stale builds.

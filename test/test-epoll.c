@@ -13,6 +13,7 @@
 #include "test-harness.h"
 #include <stdint.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
 #include <sys/wait.h>
@@ -316,6 +317,55 @@ int main(void) {
             close(pipefd[1]);
             close(epfd);
         }
+    }
+
+
+    /* Tokio/Mio clones its epoll registry with F_DUPFD_CLOEXEC during
+     * Runtime::new(). The duplicate must refer to the same logical epoll
+     * instance, retain registrations, and remain usable after either alias
+     * is closed. */
+    TEST("F_DUPFD_CLOEXEC shares epoll instance");
+    {
+        int epfd = epoll_create1(EPOLL_CLOEXEC);
+        int dupfd = epfd >= 0 ? fcntl(epfd, F_DUPFD_CLOEXEC, 0) : -1;
+        int pipefd[2] = {-1, -1};
+
+        if (epfd < 0 || dupfd < 0 || pipe(pipefd) != 0) {
+            FAIL("epoll duplicate setup failed");
+        } else {
+            struct epoll_event ev = {
+                .events = EPOLLIN,
+                .data.u64 = 0x544F4B494FULL,
+            };
+
+            if (epoll_ctl(dupfd, EPOLL_CTL_ADD, pipefd[0], &ev) != 0) {
+                FAIL("epoll_ctl through duplicated epoll fd failed");
+            } else {
+                write(pipefd[1], "x", 1);
+
+                struct epoll_event out;
+                int n = epoll_wait(epfd, &out, 1, 1000);
+                if (n != 1 || !(out.events & EPOLLIN) ||
+                    out.data.u64 != 0x544F4B494FULL) {
+                    FAIL("original epoll fd did not observe duplicate registration");
+                } else {
+                    close(epfd);
+                    epfd = -1;
+
+                    ev.events = EPOLLIN;
+                    ev.data.u64 = 0x4D494FULL;
+                    if (epoll_ctl(dupfd, EPOLL_CTL_MOD, pipefd[0], &ev) == 0)
+                        PASS();
+                    else
+                        FAIL("duplicated epoll fd broke after original close");
+                }
+            }
+        }
+
+        if (pipefd[0] >= 0) close(pipefd[0]);
+        if (pipefd[1] >= 0) close(pipefd[1]);
+        if (epfd >= 0) close(epfd);
+        if (dupfd >= 0) close(dupfd);
     }
 
     SUMMARY("test-epoll");

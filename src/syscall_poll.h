@@ -25,6 +25,8 @@ int64_t sys_epoll_ctl(guest_t *g, int epfd, int op, int fd,
 int64_t sys_epoll_pwait(guest_t *g, int epfd, uint64_t events_gva,
                          int maxevents, int timeout_ms,
                          uint64_t sigmask_gva);
+void hl_epoll_instance_retain(void *instance);
+void hl_epoll_instance_release(void *instance);
 
 /* A kqueue descriptor cannot cross a Darwin SCM_RIGHTS boundary.  Fork
  * therefore recreates each epoll instance in the child and replays these

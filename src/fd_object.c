@@ -6,6 +6,7 @@
 #include "fd_object.h"
 #include "syscall.h"
 #include "syscall_internal.h"
+#include "syscall_poll.h"
 #include "trace.h"
 
 #include <stdio.h>
@@ -109,7 +110,7 @@ void hl_descriptor_release(hl_descriptor_t *d) {
             if (d->type == FD_DIR)
                 closedir((DIR *)d->dir);
             else if (d->type == FD_EPOLL)
-                free(d->dir);
+                hl_epoll_instance_release(d->dir);
             d->dir = NULL;
         }
         hl_open_file_release(d->of);
@@ -305,7 +306,7 @@ int hl_fd_remove(int guest_fd, hl_fd_detached_t *out) {
 void hl_fd_free_dir(int type, void *dir) {
     if (!dir) return;
     if (type == FD_DIR) closedir((DIR *)dir);
-    else if (type == FD_EPOLL) free(dir);
+    else if (type == FD_EPOLL) hl_epoll_instance_release(dir);
     else if (type == FD_VIRTUAL_DIR) hl_vdir_release(dir);  /* refcounted */
     /* FD_DEVICE and everything else: not owned here. */
 }
@@ -377,10 +378,14 @@ int hl_fd_dup_from(int oldfd, int minfd, int cloexec) {
             | (cloexec ? LINUX_O_CLOEXEC : 0);
         /* FD_DEVICE's .dir is a NON-OWNING pointer into the static device
          * registry, so a dup must carry it (else fstat on the dup falls back
-         * to the host device numbers — V6). Never copy .dir for owning kinds
-         * (FD_DIR/FD_EPOLL/FD_VIRTUAL_DIR): that would double-free. */
-        if (fd_table[oldfd].type == FD_DEVICE)
+         * to the host device numbers — V6). epoll descriptors also share one
+         * logical epoll instance across dup/F_DUPFD/F_DUPFD_CLOEXEC. */
+        if (fd_table[oldfd].type == FD_DEVICE) {
             fd_table[gfd].dir = fd_table[oldfd].dir;
+        } else if (fd_table[oldfd].type == FD_EPOLL) {
+            fd_table[gfd].dir = fd_table[oldfd].dir;
+            hl_epoll_instance_retain(fd_table[gfd].dir);
+        }
         pthread_mutex_unlock(&fd_lock);
         hl_fd_put(&ref);
         return gfd;
@@ -449,6 +454,15 @@ int hl_fd_dup3(int oldfd, int newfd, int flags) {
 
     uint32_t fd_flags = (flags & LINUX_O_CLOEXEC) ? LINUX_O_CLOEXEC : 0;
     int kind = of ? of->kind : fd_table[oldfd].type;
+    void *shared_dir = NULL;
+    if (!of && kind == FD_EPOLL) {
+        pthread_mutex_lock(&fd_lock);
+        if (fd_table[oldfd].type == FD_EPOLL && fd_table[oldfd].dir) {
+            shared_dir = fd_table[oldfd].dir;
+            hl_epoll_instance_retain(shared_dir);
+        }
+        pthread_mutex_unlock(&fd_lock);
+    }
     hl_descriptor_t *nd = NULL;
     if (of) {
         nd = hl_descriptor_create(of, new_host, fd_flags, kind, NULL);
@@ -473,6 +487,7 @@ int hl_fd_dup3(int oldfd, int newfd, int flags) {
     }
 
     if (fd_alloc_at(newfd, kind, new_host) < 0) {
+        if (shared_dir) hl_epoll_instance_release(shared_dir);
         if (nd) hl_descriptor_release(nd);
         else if (new_host >= 0) close(new_host);
         hl_fd_put(&ref);
@@ -484,6 +499,8 @@ int hl_fd_dup3(int oldfd, int newfd, int flags) {
     if (nd) hl_fd_sync_legacy(newfd);
     else {
         fd_table[newfd].linux_flags = (int)fd_flags;
+        if (kind == FD_EPOLL)
+            fd_table[newfd].dir = shared_dir;
     }
     pthread_mutex_unlock(&fd_lock);
 

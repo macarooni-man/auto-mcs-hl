@@ -602,8 +602,21 @@ typedef struct {
  * has its own registration table so multiple epoll instances watching
  * the same FD don't overwrite each other's user data. */
 typedef struct {
+    atomic_uint refcount;
     epoll_reg_t regs[FD_TABLE_SIZE];
 } epoll_instance_t;
+
+void hl_epoll_instance_retain(void *ptr) {
+    epoll_instance_t *inst = ptr;
+    if (inst)
+        atomic_fetch_add(&inst->refcount, 1);
+}
+
+void hl_epoll_instance_release(void *ptr) {
+    epoll_instance_t *inst = ptr;
+    if (inst && atomic_fetch_sub(&inst->refcount, 1) == 1)
+        free(inst);
+}
 
 static int64_t epoll_add_filters(int kq_fd, int guest_fd, int host_fd,
                                  uint32_t events) {
@@ -640,9 +653,14 @@ int64_t sys_epoll_create1(int flags) {
     /* Allocate per-instance registration table */
     epoll_instance_t *inst = calloc(1, sizeof(epoll_instance_t));
     if (!inst) { close(kq); return -LINUX_ENOMEM; }
+    atomic_init(&inst->refcount, 1);
 
     int gfd = fd_alloc(FD_EPOLL, kq);
-    if (gfd < 0) { free(inst); close(kq); return -LINUX_EMFILE; }
+    if (gfd < 0) {
+        hl_epoll_instance_release(inst);
+        close(kq);
+        return -LINUX_EMFILE;
+    }
 
     fd_table[gfd].dir = inst;
     int lflags = 0;
@@ -778,8 +796,9 @@ int hl_epoll_fork_import(int epfd, const hl_epoll_fork_reg_t *regs,
         close(kq);
         return -1;
     }
+    atomic_init(&inst->refcount, 1);
     if (fd_alloc_at(epfd, FD_EPOLL, kq) < 0) {
-        free(inst);
+        hl_epoll_instance_release(inst);
         close(kq);
         return -1;
     }

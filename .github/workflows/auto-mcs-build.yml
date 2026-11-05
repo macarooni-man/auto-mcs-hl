@@ -1,0 +1,46 @@
+name: Build auto-mcs hl
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install GNU binutils
+        run: brew install binutils
+
+      - name: Build ARM64 hl
+        run: |
+          make hl \
+            OBJCOPY="$(brew --prefix binutils)/bin/gobjcopy" \
+            SIGN_IDENTITY="-"
+
+      - name: Verify binary and entitlement
+        run: |
+          file _build/hl
+          lipo -info _build/hl
+          codesign -d --entitlements :- _build/hl
+
+      - name: Package
+        run: |
+          chmod +x _build/hl
+          tar -czf hl-macos-arm64.tar.gz -C _build hl
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hl-macos-arm64
+          path: hl-macos-arm64.tar.gz
+          if-no-files-found: error

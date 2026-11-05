@@ -208,19 +208,13 @@ int fd_alloc_at(int fd, int type, int host_fd) {
      * violation: cleanup functions acquire sfd_lock/inotify_lock. */
     int old_type = FD_CLOSED;
     int old_host_fd = -1;
-    DIR *old_dir = NULL;
-    void *old_epoll = NULL;
+    void *old_dir = NULL;
 
     pthread_mutex_lock(&fd_lock);
     if (fd_table[fd].type != FD_CLOSED) {
         old_type = fd_table[fd].type;
         old_host_fd = fd_table[fd].host_fd;
-        if (fd_table[fd].dir) {
-            if (old_type == FD_DIR)
-                old_dir = (DIR *)fd_table[fd].dir;
-            else if (old_type == FD_EPOLL || old_type == FD_VIRTUAL_DIR)
-                old_epoll = fd_table[fd].dir;   /* plain free() below */
-        }
+        old_dir = fd_table[fd].dir;
     }
     hl_descriptor_t *old_desc = fd_table[fd].desc;
     hl_open_file_t *old_of = fd_table[fd].of;
@@ -240,8 +234,7 @@ int fd_alloc_at(int fd, int type, int host_fd) {
     if (old_desc) {
         hl_descriptor_release(old_desc);
     } else if (old_type != FD_CLOSED) {
-        if (old_dir)   closedir(old_dir);
-        if (old_epoll) free(old_epoll);
+        if (old_dir) hl_fd_free_dir(old_type, old_dir);
         if (old_of) hl_open_file_release(old_of);
         switch (old_type) {
         case FD_EVENTFD:  eventfd_close(fd);  break;
