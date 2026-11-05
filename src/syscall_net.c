@@ -1232,6 +1232,16 @@ int64_t sys_sendmsg(guest_t *g, int fd, uint64_t msg_gva, int linux_flags) {
             };
             ret = sendmsg(host_fd, &msg, mac_flags);
         }
+        if (hl_trace_on(HL_TRACE_SYS)) {
+            size_t requested = 0;
+            for (int i = 0; i < iovlen; i++) requested += host_iov[i].iov_len;
+            if (ret >= 0)
+                hl_trace(HL_TRACE_SYS, "net sendmsg-fast fd=%d host=%d requested=%zu iovcnt=%d flags=0x%x result=%lld",
+                         fd, host_fd, requested, iovlen, linux_flags, (long long)ret);
+            else
+                hl_trace(HL_TRACE_SYS, "net sendmsg-fast fd=%d host=%d requested=%zu iovcnt=%d flags=0x%x errno=%d(%s)",
+                         fd, host_fd, requested, iovlen, linux_flags, errno, strerror(errno));
+        }
         if (ret < 0) {
             if (errno == EPIPE && !suppress_sigpipe)
                 signal_queue(LINUX_SIGPIPE);
@@ -1385,6 +1395,16 @@ int64_t sys_sendmsg(guest_t *g, int fd, uint64_t msg_gva, int linux_flags) {
 
     ssize_t ret = sendmsg(host_fd, &msg, mac_flags);
     int send_errno = errno;
+    if (hl_trace_on(HL_TRACE_SYS)) {
+        size_t requested = 0;
+        for (int i = 0; i < iovlen; i++) requested += host_iov[i].iov_len;
+        if (ret >= 0)
+            hl_trace(HL_TRACE_SYS, "net sendmsg fd=%d host=%d requested=%zu iovcnt=%d flags=0x%x result=%lld",
+                     fd, host_fd, requested, iovlen, linux_flags, (long long)ret);
+        else
+            hl_trace(HL_TRACE_SYS, "net sendmsg fd=%d host=%d requested=%zu iovcnt=%d flags=0x%x errno=%d(%s)",
+                     fd, host_fd, requested, iovlen, linux_flags, send_errno, strerror(send_errno));
+    }
     unix_confine_end(&cf);
     if (ret < 0) {
         errno = send_errno;
@@ -1478,6 +1498,16 @@ int64_t sys_recvmsg(guest_t *g, int fd, uint64_t msg_gva, int flags) {
     };
 
     ssize_t ret = recvmsg(host_fd, &msg, mac_flags);
+    if (hl_trace_on(HL_TRACE_SYS)) {
+        size_t requested = 0;
+        for (int i = 0; i < iovlen; i++) requested += host_iov[i].iov_len;
+        if (ret >= 0)
+            hl_trace(HL_TRACE_SYS, "net recvmsg fd=%d host=%d requested=%zu iovcnt=%d flags=0x%x result=%lld msg_flags=0x%x",
+                     fd, host_fd, requested, iovlen, flags, (long long)ret, msg.msg_flags);
+        else if (errno != EAGAIN && errno != EWOULDBLOCK)
+            hl_trace(HL_TRACE_SYS, "net recvmsg fd=%d host=%d requested=%zu iovcnt=%d flags=0x%x errno=%d(%s)",
+                     fd, host_fd, requested, iovlen, flags, errno, strerror(errno));
+    }
     if (ret < 0) return linux_errno();
 
     /* Write back source address to guest */
