@@ -494,7 +494,18 @@ int64_t sys_readv(guest_t *g, int fd, uint64_t iov_gva, int iovcnt) {
     int64_t err = build_host_iov(g, iov_gva, iovcnt, host_iov);
     if (err < 0) return err;
 
+    size_t requested = 0;
+    for (int i = 0; i < iovcnt; i++) requested += host_iov[i].iov_len;
     ssize_t ret = readv(host_fd, host_iov, iovcnt);
+    if (fd >= 0 && fd < FD_TABLE_SIZE && fd_table[fd].type == FD_SOCKET &&
+        hl_trace_on(HL_TRACE_SYS)) {
+        if (ret >= 0)
+            hl_trace(HL_TRACE_SYS, "net readv fd=%d host=%d requested=%zu iovcnt=%d result=%lld",
+                     fd, host_fd, requested, iovcnt, (long long)ret);
+        else if (errno != EAGAIN && errno != EWOULDBLOCK)
+            hl_trace(HL_TRACE_SYS, "net readv fd=%d host=%d requested=%zu iovcnt=%d errno=%d(%s)",
+                     fd, host_fd, requested, iovcnt, errno, strerror(errno));
+    }
     return ret < 0 ? linux_errno() : ret;
 }
 
@@ -556,7 +567,18 @@ int64_t sys_writev(guest_t *g, int fd, uint64_t iov_gva, int iovcnt) {
     int64_t err = build_host_iov(g, iov_gva, iovcnt, host_iov);
     if (err < 0) return err;
 
+    size_t requested = 0;
+    for (int i = 0; i < iovcnt; i++) requested += host_iov[i].iov_len;
     ssize_t ret = writev(host_fd, host_iov, iovcnt);
+    if (fd >= 0 && fd < FD_TABLE_SIZE && fd_table[fd].type == FD_SOCKET &&
+        hl_trace_on(HL_TRACE_SYS)) {
+        if (ret >= 0)
+            hl_trace(HL_TRACE_SYS, "net writev fd=%d host=%d requested=%zu iovcnt=%d result=%lld",
+                     fd, host_fd, requested, iovcnt, (long long)ret);
+        else
+            hl_trace(HL_TRACE_SYS, "net writev fd=%d host=%d requested=%zu iovcnt=%d errno=%d(%s)",
+                     fd, host_fd, requested, iovcnt, errno, strerror(errno));
+    }
     if (ret < 0) {
         int saved_errno = errno;
         if (saved_errno == EPIPE) signal_queue(LINUX_SIGPIPE);
